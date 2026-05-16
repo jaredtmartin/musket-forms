@@ -42,7 +42,7 @@ type Dog struct {
 	// Should render default TextField
 	Name string
 	// Should render NumberField by data type
-	Age int `name:"dob" format:"int"`
+	Age int `name:"dob" format:"int" element:"Number"`
 	// Should render NumberField by data type
 	Value64 int64 `label:"64bit"`
 	// Should render NumberField by data type
@@ -61,11 +61,13 @@ type Cat struct {
 }
 
 func NewDog(name string) *Dog {
-	return &Dog{
+	dog := &Dog{
 		Model: NewModel("dogs", name),
 		Name:  strings.ToLower(name),
 		Age:   5,
 	}
+	dog.Theme = theme
+	return dog
 }
 
 func TestSimpleForm(t *testing.T) {
@@ -74,7 +76,7 @@ func TestSimpleForm(t *testing.T) {
 		Name:  "Wix",
 		Breed: "Mix",
 	}
-	result := wix.Form(wix).Render()
+	result := wix.Form(wix, "", theme).Render()
 	expected := `<form><input name="Id" type="hidden" value="&lt;forms_test.Model Value&gt;"><div><label for="Name-field">Name</label><input id="Name-field" name="Name" type="text" value="Wix"><div id="Name-field-error"></div></div><div><label for="Breed-field">Breed</label><input id="Breed-field" name="Breed" type="text" value="Mix"><div id="Breed-field-error"></div></div></form>`
 	assert.Equal(t, expected, result, "should match")
 }
@@ -84,7 +86,7 @@ func TestFormWithPrefix(t *testing.T) {
 		Name:  "Wix",
 		Breed: "Mix",
 	}
-	result := wix.Form(wix, "cats[0].").Render()
+	result := wix.Form(wix, "cats[0].", theme).Render()
 	expected := `<form><input name="Id" type="hidden" value="&lt;forms_test.Model Value&gt;"><div><label for="cats[0].Name-field">Name</label><input id="cats[0].Name-field" name="cats[0].Name" type="text" value="Wix"><div id="cats[0].Name-field-error"></div></div><div><label for="cats[0].Breed-field">Breed</label><input id="cats[0].Breed-field" name="cats[0].Breed" type="text" value="Mix"><div id="cats[0].Breed-field-error"></div></div></form>`
 	assert.Equal(t, expected, result, "should match")
 }
@@ -94,38 +96,38 @@ func TestSimpleField(t *testing.T) {
 		Name:  "Wix",
 		Breed: "Mix",
 	}
-	result := wix.Field("Name", wix).Render()
+	result := wix.Field("Name", wix, theme).Render()
 	expected := `<div><label for="Name-field">Name</label><input id="Name-field" name="Name" type="text" value="Wix"><div id="Name-field-error"></div></div>`
 	assert.Equal(t, expected, result, "should match")
 }
 func TestFieldNameTag(t *testing.T) {
 	spot := NewDog("Spot")
-	result := spot.Field("Age", spot).Render()
-	expected := `<div type="number"><label for="dob-field">Age</label><input id="dob-field" name="dob" type="text" value="5"><div id="dob-field-error"></div></div>`
+	result := spot.Field("Age", spot, theme).Render()
+	expected := `<div><label for="dob-field">Age</label><input id="dob-field" name="dob" type="number" value="5"><div id="dob-field-error"></div></div>`
 	assert.Equal(t, expected, result, "should match")
 }
 func TestFieldNameOverride(t *testing.T) {
 	spot := NewDog("Spot")
 	spot.FieldConfig("Name").Name("Nickname")
-	result := spot.Field("Name", spot).Render()
+	result := spot.Field("Name", spot, theme).Render()
 	expected := `<div><input id="Nickname-field" name="Nickname" type="text" value="spot"><div id="Nickname-field-error"></div></div>`
 	assert.Equal(t, expected, result, "should match")
 }
 func TestIntValueFormatFromTag(t *testing.T) {
 	spot := NewDog("Spot")
-	result := spot.Field("Age", spot).Render()
-	expected := `<div type="number"><label for="dob-field">Age</label><input id="dob-field" name="dob" type="text" value="5"><div id="dob-field-error"></div></div>`
+	result := spot.Field("Age", spot, theme).Render()
+	expected := `<div><label for="dob-field">Age</label><input id="dob-field" name="dob" type="number" value="5"><div id="dob-field-error"></div></div>`
 	assert.Equal(t, expected, result, "should match")
 }
 func TestIntValueFormatFromConfig(t *testing.T) {
 	spot := NewDog("Spot")
 	spot.Value32 = 77
-	result := spot.Field("Value32", spot).Render()
-	expected := `<div type="number"><label for="Value32-field">Value32</label><input id="Value32-field" name="Value32" type="text" value="&lt;int32 Value&gt;"><div id="Value32-field-error"></div></div>`
+	result := spot.Field("Value32", spot, theme).Render()
+	expected := `<div><label for="Value32-field">Value32</label><input id="Value32-field" name="Value32" type="number" value="77"><div id="Value32-field-error"></div></div>`
 	assert.Equal(t, expected, result, "should match")
 	spot.FieldConfig("Value32").Formatter(forms.IntFormatter)
-	result = spot.Field("Value32", spot).Render()
-	expected = `<div type="number"><input id="-field" name type="text" value="77"><div id="-field-error"></div></div>`
+	result = spot.Field("Value32", spot, theme).Render()
+	expected = `<div><input id="-field" name type="number" value="77"><div id="-field-error"></div></div>`
 	assert.Equal(t, expected, result, "should match")
 }
 
@@ -138,7 +140,7 @@ func TestHiddenFieldFromTag(t *testing.T) {
 		Gender: Male,
 		Status: Available,
 	}
-	result := spot.Field("Name", spot).Render()
+	result := spot.Field("Name", spot, theme).Render()
 	expected := `<div><label for="Name-field">Name</label><input id="Name-field" name="Name" type="text" value="Spot"><div id="Name-field-error"></div></div>`
 	assert.Equal(t, expected, result, "should match")
 }

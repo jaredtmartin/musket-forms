@@ -22,31 +22,11 @@ func (m RenderMethod) String() string {
 	return string(m)
 }
 
-type FieldTypes string
-
-func (t FieldTypes) String() string {
-	return string(t)
-}
-
-const (
-	IdFieldType       FieldTypes = "Id"
-	TextFieldType     FieldTypes = "Text"
-	HiddenFieldType   FieldTypes = "Hidden"
-	CheckboxFieldType FieldTypes = "Checkbox"
-	NumberFieldType   FieldTypes = "Number"
-	EmailFieldType    FieldTypes = "Email"
-	PhoneFieldType    FieldTypes = "Phone"
-	// TagsFieldType     FieldTypes = "Tags"
-	RadioFieldType    FieldTypes = "Radio"
-	TextareaFieldType FieldTypes = "Textarea"
-	SelectFieldType   FieldTypes = "Select"
-)
-
 type Model struct {
-	hound.Model     `bson:",inline"`
-	fieldConfig     map[string]*FieldConfig `json:"-" bson:"-"`
-	fieldComponents map[string]Component    `json:"-" bson:"-"`
-	formatters      map[string]Formatter    `json:"-" bson:"-"`
+	hound.Model `bson:",inline"`
+	Theme       *Theme                  `json:"-" bson:"-"`
+	fieldConfig map[string]*FieldConfig `json:"-" bson:"-"`
+	formatters  map[string]Formatter    `json:"-" bson:"-"`
 }
 type FieldConfig struct {
 	name      string
@@ -61,28 +41,15 @@ type FieldConfig struct {
 
 func NewModel(collectionName string, id ...string) Model {
 	return Model{
-		Model: hound.NewModel(collectionName, id...),
+		Model:       hound.NewModel(collectionName, id...),
 		fieldConfig: map[string]*FieldConfig{
-			"Model": {component: HiddenIdField},
+			// "Model": {component: HiddenIdField},
 		},
 		formatters: map[string]Formatter{
 			"int":   IntFormatter,
 			"int32": IntFormatter,
 			"int64": IntFormatter,
 			"bool":  BoolFormatter,
-		},
-		fieldComponents: map[string]Component{
-			TextFieldType.String():     TextField,
-			HiddenFieldType.String():   HiddenField,
-			IdFieldType.String():       HiddenIdField,
-			TextareaFieldType.String(): TextareaField,
-			NumberFieldType.String():   NumberField,
-			EmailFieldType.String():    EmailField,
-			PhoneFieldType.String():    PhoneField,
-			// TagsFieldType.String():     defaultTagsField,
-			CheckboxFieldType.String(): CheckboxField,
-			RadioFieldType.String():    RadioField,
-			SelectFieldType.String():   SelectField,
 		},
 	}
 }
@@ -95,9 +62,9 @@ func NewModel(collectionName string, id ...string) Model {
 type Component func(name, label, value string) *bolt.Field
 type Formatter func(value reflect.Value) string
 
-func (m *Model) UseComponent(fieldType string, component Component) {
-	m.fieldComponents[fieldType] = component
-}
+//	func (m *Model) UseComponent(fieldType string, component Component) {
+//		m.Theme[fieldType] = component
+//	}
 func (m *Model) FieldConfig(name string) *FieldConfig {
 	config := &FieldConfig{}
 	m.fieldConfig[name] = config
@@ -115,32 +82,6 @@ func (c *FieldConfig) Component(component Component) {
 func (c *FieldConfig) Formatter(formatter Formatter) {
 	c.formatter = formatter
 }
-
-func (m *Model) getComponent(meta reflect.StructField) Component {
-	// Check if there's a renderer specified for the field by name
-
-	if config, ok := m.fieldConfig[meta.Name]; ok {
-		if config.component != nil {
-			return config.component
-		}
-	}
-
-	// log.Println(`meta.Tag.Get("element"): `, meta.Tag.Get("element"))
-	if tagEl := meta.Tag.Get("element"); tagEl != "" {
-		if el, ok := m.fieldComponents[tagEl]; ok {
-			return el
-		}
-	}
-	if elName := getElementFromDataType(meta.Type.String()); elName != "" {
-		if el, ok := m.fieldComponents[elName.String()]; ok {
-			return el
-		}
-	}
-	return m.fieldComponents[TextFieldType.String()]
-}
-func blankField() *bolt.Field {
-	return &bolt.Field{DefaultElement: bolt.NewDefaultElement("")}
-}
 func getReflectTypeAndValue(obj any) (reflect.Type, reflect.Value) {
 	objType := reflect.TypeOf(obj)
 	objValue := reflect.ValueOf(obj)
@@ -151,33 +92,48 @@ func getReflectTypeAndValue(obj any) (reflect.Type, reflect.Value) {
 	}
 	return objType, objValue
 }
-func (m *Model) renderField(meta reflect.StructField, value reflect.Value, prefix ...string) *bolt.Field {
-	namePrefix := ""
-	if len(prefix) > 0 {
-		namePrefix = prefix[0]
+func (m *Model) renderField(meta reflect.StructField, value reflect.Value, prefix string, themes ...*Theme) *bolt.Field {
+	theme := m.getTheme(themes...)
+	var component Component
+	if config, ok := m.fieldConfig[meta.Name]; ok && config.component != nil {
+		component = config.component
+	} else {
+		component = theme.GetComponent(meta)
 	}
-	component := m.getComponent(meta)
-	if component == nil {
-		log.Println(`getComponent returned no component!`)
-	}
-	return component(namePrefix+m.getName(meta), m.getLabel(meta), m.getValue(meta, value))
+	field := component(prefix+m.getName(meta), m.getLabel(meta), m.getValue(meta, value))
+	log.Printf(`rendered field for %s: %s`, meta.Name, field.Render())
+	return field
 }
-func (m *Model) Field(name string, obj any) *bolt.Field {
+func errorField(err error) *bolt.Field {
+	field := &bolt.Field{DefaultElement: bolt.NewDefaultElement("p")}
+	field.DefaultElement.Text(err.Error()).Class("text-red-500")
+	return field
+}
+func (m *Model) getTheme(themes ...*Theme) *Theme {
+	if len(themes) > 0 {
+		return themes[0]
+	}
+	if m.Theme != nil {
+		return m.Theme
+	} else {
+		log.Println("No theme provided.")
+		return NewTheme(defaultComponent)
+	}
+}
+func (m *Model) Field(name string, obj any, theme ...*Theme) *bolt.Field {
 	objType, objValue := getReflectTypeAndValue(obj)
 	// Get the struct field by name (on the TYPE, not the value)
 	meta, ok := objType.FieldByName(name)
 	if !ok {
 		log.Printf("Field with name %s not found\n", name)
-		return blankField()
+		return errorField(fmt.Errorf("Field with name %s not found\n", name))
 	}
 	// Get the value
 	value := objValue.FieldByName(name)
 	if !value.IsValid() {
-		return blankField()
+		return errorField(fmt.Errorf("Value for with name %s is not valid\n", name))
 	}
-	return m.renderField(meta, value)
-	// log.Printf("Field with name %s not found\n", name)
-	// return &bolt.Field{DefaultElement: bolt.NewDefaultElement("")}
+	return m.renderField(meta, value, "", theme...)
 }
 func (m *Model) getFormatter(meta reflect.StructField) Formatter {
 	if config, ok := m.fieldConfig[meta.Name]; ok && config.formatter != nil {
@@ -188,6 +144,15 @@ func (m *Model) getFormatter(meta reflect.StructField) Formatter {
 		if formatter, ok := m.formatters[format]; ok {
 			return formatter
 		}
+	}
+	if meta.Type.Kind() == reflect.Int || meta.Type.Kind() == reflect.Int32 || meta.Type.Kind() == reflect.Int64 {
+		return IntFormatter
+	}
+	if meta.Type.Kind() == reflect.Bool {
+		return BoolFormatter
+	}
+	if meta.Type.Kind() == reflect.String && meta.Type.String() == "[]string" {
+		return StringSliceFormatter
 	}
 	return StringFormatter
 }
@@ -209,33 +174,21 @@ func (m *Model) getLabel(meta reflect.StructField) string {
 }
 
 func (m *Model) getName(meta reflect.StructField) string {
+	log.Println(`getting name for:`, meta.Name)
 	config, ok := m.fieldConfig[meta.Name]
 	if ok {
+		log.Printf(`found config.name for  %s: %s`, meta.Name, config.name)
 		return config.name
 	}
 	name := meta.Tag.Get("name")
 	if name != "" {
+		log.Printf(`found name Tag for  %s: %s`, meta.Name, name)
 		return name
 	}
+	log.Printf(`using field name for  %s`, meta.Name)
 	return meta.Name
 }
-func getElementFromDataType(datatype string) FieldTypes {
-	switch datatype {
-	case "string":
-		return TextFieldType
-	case "int":
-		return NumberFieldType
-	case "int32":
-		return NumberFieldType
-	case "int64":
-		return NumberFieldType
-	case "bool":
-		return CheckboxFieldType
-	default:
-		return TextFieldType
-	}
-}
-func (m *Model) Form(s any, prefix ...string) bolt.Element {
+func (m *Model) Form(s any, prefix string, theme ...*Theme) bolt.Element {
 	objType, objValue := getReflectTypeAndValue(s)
 	log.Printf("This object has %d fields to render. ", objType.NumField())
 	form := bolt.Form()
@@ -250,70 +203,11 @@ func (m *Model) Form(s any, prefix ...string) bolt.Element {
 			continue
 		}
 		log.Printf(`Rendering %s of type %s`, meta.Name, meta.Type)
-		form.Add(m.renderField(meta, value, prefix...))
+		form.Add(m.renderField(meta, value, prefix, theme...))
 	}
 	return form
 }
 
-func HiddenField(name, label, value string) *bolt.Field {
-	log.Println("Rendering HiddenField with label", label)
-	inputEl := bolt.HiddenInput(name, value)
-	field := &bolt.Field{
-		DefaultElement: bolt.NewDefaultElement(""),
-		Input:          inputEl,
-	}
-	field.Children(inputEl)
-	return field
-}
-func HiddenIdField(name, label, value string) *bolt.Field {
-	log.Println("Rendering IdField with label", label)
-	return HiddenField("Id", "", value)
-}
-func TextField(name, label, value string) *bolt.Field {
-	log.Println("Rendering TextField with label", label)
-	return bolt.TextField(name, label, value)
-}
-func TextareaField(name, label, value string) *bolt.Field {
-	log.Println("Rendering TextareaField with label", label)
-	return bolt.Textarea(name, label, value)
-}
-func NumberField(name, label, value string) *bolt.Field {
-	log.Println("Rendering NumberField with label", label)
-	input := bolt.TextField(name, label, value)
-	input.Type("number")
-	return input
-}
-func EmailField(name, label, value string) *bolt.Field {
-	log.Println("Rendering EmailField with label", label)
-	input := bolt.TextField(name, label, value)
-	input.Type("email")
-	return input
-}
-func PhoneField(name, label, value string) *bolt.Field {
-	log.Println("Rendering PhoneField with label", label)
-	input := bolt.TextField(name, label, value)
-	input.Type("phone")
-	return input
-}
-
-// func defaultTagsField(name, label, value string) *bolt.Field {
-
-// }
-func CheckboxField(name, label, value string) *bolt.Field {
-	log.Println("Rendering CheckboxField with label", label)
-	return bolt.Checkbox(name, label, value)
-}
-func RadioField(name, label, value string) *bolt.Field {
-	log.Println("Rendering RadioField with label", label)
-	return bolt.Radio(name, label, value)
-}
-func SelectField(name, label, value string) *bolt.Field {
-	log.Println("Rendering SelectField with label", label)
-	return bolt.Select(name, label, value, []bolt.Option{
-		{Label: "Male", Value: "male"},
-		{Label: "Female", Value: "female"},
-	})
-}
 func StringFormatter(v reflect.Value) string {
 	return fmt.Sprint(v.String())
 }
@@ -331,7 +225,7 @@ func IdFormatter(v reflect.Value) string {
 		// fmt.Println("ID via assertion:", modelStruct.Id)
 		return modelStruct.Id
 	}
-	log.Println("Unable to ")
+	log.Println("Unable to get Id from Model")
 	return ""
 }
 func StringSliceFormatter(v reflect.Value) string {
@@ -340,7 +234,9 @@ func StringSliceFormatter(v reflect.Value) string {
 	}
 	return fmt.Sprint(v.Interface())
 }
-
+func defaultComponent(name, label, value string) *bolt.Field {
+	return bolt.TextField(name, label, value)
+}
 func (m *Model) Element(name ...string) bolt.Element {
 	nameFormat := "Id"
 	if len(name) > 0 {
